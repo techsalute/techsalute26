@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Community Management Portal</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Navigation Bar -->
+    <nav class="navbar" id="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <i class="fas fa-users"></i>
+                <span>Community Portal</span>
+            </div>
+            <div class="nav-links" id="navLinks">
+                <!-- Dynamically populated based on login state -->
+            </div>
+            <button class="menu-toggle" id="menuToggle">
+                <i class="fas fa-bars"></i>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Main Content Container -->
+    <div id="mainContent">
+        <!-- Home Page (Default) -->
+        <section id="homePage" class="page active">
+            <div class="hero">
+                <h1>Welcome to Community Portal</h1>
+                <p>Connect, Contribute, and Stay Updated with Your Community</p>
+                <div class="hero-buttons">
+                    <button class="btn btn-primary" onclick="showPage('userLogin')">Member Login</button>
+                    <button class="btn btn-secondary" onclick="showPage('adminLogin')">Admin Login</button>
+                </div>
+            </div>
+            
+            <div class="features">
+                <div class="feature-card">
+                    <i class="fas fa-user-tie"></i>
+                    <h3>Community Leaders</h3>
+                    <p>View our dedicated leaders and their activities</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-hand-holding-usd"></i>
+                    <h3>Donation Tracking</h3>
+                    <p>Track your monthly donations seamlessly</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-comments"></i>
+                    <h3>Direct Communication</h3>
+                    <p>Connect with admin for any queries</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- User Login Page -->
+        <section id="userLogin" class="page">
+            <div class="auth-container">
+                <div class="auth-card">
+                    <h2>Member Login</h2>
+                    <form id="userLoginForm">
+                        <div class="form-group">
+                            <label for="userEmail">Email</label>
+                            <input type="email" id="userEmail" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="userPassword">Password</label>
+                            <input type="password" id="userPassword" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-block">Login</button>
+                    </form>
+                    <p class="auth-switch">Not a member? <a href="#" onclick="showPage('userRegister')">Register here</a></p>
+                </div>
+            </div>
+        </section>
+
+        <!-- User Registration Page -->
+        <section id="userRegister" class="page">
+            <div class="auth-container">
+                <div class="auth-card">
+                    <h2>Member Registration</h2>
+                    <form id="userRegisterForm">
+                        <div class="form-group">
+                            <label for="regName">Full Name</label>
+                            <input type="text" id="regName" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="regEmail">Email</label>
+                            <input type="email" id="regEmail" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="regPassword">Password</label>
+                            <input type="password" id="regPassword" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="regPhone">Phone Number</label>
+                            <input type="tel" id="regPhone">
+                        </div>
+                        <div class="form-group">
+                            <label for="regAddress">Address</label>
+                            <textarea id="regAddress" rows="3"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-block">Register</button>
+                    </form>
+                    <p class="auth-switch">Already registered? <a href="#" onclick="showPage('userLogin')">Login here</a></p>
+                </div>
+            </div>
+        </section>
+
+        <!-- User Dashboard -->
+        <section id="userDashboard" class="page">
+            <div class="dashboard-header">
+                <h2>Welcome, <span id="userName"></span></h2>
+                <p>Your Community Dashboard</p>
+            </div>
+            
+            <div class="dashboard-cards">
+                <div class="card" onclick="showPage('leadersPage')">
+                    <i class="fas fa-user-tie card-icon"></i>
+                    <h3>Community Leaders</h3>
+                    <p>View leaders and their work</p>
+                </div>
+                <div class="card" onclick="showPage('donationStatus')">
+                    <i class="fas fa-hand-holding-usd card-icon"></i>
+                    <h3>Donation Status</h3>
+                    <p>Check your donation records</p>
+                </div>
+                <div class="card" onclick="showPage('contactAdmin')">
+                    <i class="fas fa-comments card-icon"></i>
+                    <h3>Contact Admin</h3>
+                    <p>Send messages to admin</p>
+                </div>
+            </div>
+            
+            <div class="recent-activities">
+                <h3>Recent Leader Activities</h3>
+                <div id="userRecentActivities" class="activities-list">
+                    <!-- Dynamically populated -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Admin Login Page -->
+        <section id="adminLogin" class="page">
+            <div class="auth-container">
+                <div class="auth-card">
+                    <h2>Admin Login</h2>
+                    <form id="adminLoginForm">
+                        <div class="form-group">
+                            <label for="adminEmail">Admin Email</label>
+                            <input type="email" id="adminEmail" value="admin@community.com" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label for="adminPassword">Password</label>
+                            <input type="password" id="adminPassword" required>
+                        </div>
+                        <button type="submit" class="btn btn-danger btn-block">Login as Admin</button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- Admin Dashboard -->
+        <section id="adminDashboard" class="page">
+            <div class="dashboard-header">
+                <h2>Admin Dashboard</h2>
+                <p>Manage Community Portal</p>
+            </div>
+            
+            <div class="admin-controls">
+                <button class="btn btn-primary" onclick="showPage('manageLeaders')">
+                    <i class="fas fa-user-tie"></i> Manage Leaders
+                </button>
+                <button class="btn btn-primary" onclick="showPage('manageDonations')">
+                    <i class="fas fa-hand-holding-usd"></i> Manage Donations
+                </button>
+                <button class="btn btn-primary" onclick="showPage('viewMessages')">
+                    <i class="fas fa-envelope"></i> View Messages
+                </button>
+                <button class="btn btn-secondary" onclick="showPage('addLeaderWork')">
+                    <i class="fas fa-plus"></i> Add Leader Work
+                </button>
+            </div>
+            
+            <div class="admin-stats">
+                <div class="stat-card">
+                    <h3 id="totalLeaders">0</h3>
+                    <p>Total Leaders</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="totalMessages">0</h3>
+                    <p>Unread Messages</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="pendingDonations">0</h3>
+                    <p>Pending Donations</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Leaders Page -->
+        <section id="leadersPage" class="page">
+            <div class="page-header">
+                <h2>Community Leaders</h2>
+                <button class="btn btn-back" onclick="goBack()">
+                    <i class="fas fa-arrow-left"></i> Back
+                </button>
+            </div>
+            
+            <div id="leadersList" class="leaders-container">
+                <!-- Dynamically populated -->
+            </div>
+        </section>
+
+        <!-- Manage Leaders (Admin) -->
+        <section id="manageLeaders" class="page">
+            <div class="page-header">
+                <h2>Manage Leaders</h2>
+                <button class="btn btn-primary" onclick="showAddLeaderModal()">
+                    <i class="fas fa-plus"></i> Add New Leader
+                </button>
+            </div>
+            
+            <div id="adminLeadersList" class="leaders-container">
+                <!-- Dynamically populated -->
+            </div>
+        </section>
+
+        <!-- Add Leader Work (Admin) -->
+        <section id="addLeaderWork" class="page">
+            <div class="page-header">
+                <h2>Add Leader Work</h2>
+                <button class="btn btn-back" onclick="showPage('adminDashboard')">
+                    <i class="fas fa-arrow-left"></i> Back to Dashboard
+                </button>
+            </div>
+            
+            <div class="form-container">
+                <form id="addWorkForm">
+                    <div class="form-group">
+                        <label for="workLeader">Select Leader</label>
+                        <select id="workLeader" required>
+                            <!-- Dynamically populated -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="workTitle">Work Title</label>
+                        <input type="text" id="workTitle" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="workDescription">Description</label>
+                        <textarea id="workDescription" rows="5" required></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="workDate">Date</label>
+                        <input type="date" id="workDate" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Add Work</button>
+                </form>
+            </div>
+        </section>
+
+        <!-- Donation Status Page -->
+        <section id="donationStatus" class="page">
+            <div class="page-header">
+                <h2>Your Donation Status</h2>
+                <button class="btn btn-back" onclick="goBack()">
+                    <i class="fas fa-arrow-left"></i> Back
+                </button>
+            </div>
+            
+            <div class="donation-container">
+                <div class="current-month">
+                    <h3>Current Month: <span id="currentMonth"></span></h3>
+                    <div class="status-badge" id="currentStatus">
+                        <!-- Dynamically updated -->
+                    </div>
+                </div>
+                
+                <div class="donation-history">
+                    <h3>Donation History</h3>
+                    <table id="donationTable">
+                        <thead>
+                            <tr>
+                                <th>Month</th>
+                                <th>Year</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Dynamically populated -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Manage Donations (Admin) -->
+        <section id="manageDonations" class="page">
+            <div class="page-header">
+                <h2>Manage Donations</h2>
+                <button class="btn btn-back" onclick="showPage('adminDashboard')">
+                    <i class="fas fa-arrow-left"></i> Back to Dashboard
+                </button>
+            </div>
+            
+            <div class="search-container">
+                <input type="text" id="searchUser" placeholder="Search by user email..." 
+                       onkeyup="searchUsers()">
+            </div>
+            
+            <div id="donationManagement" class="management-container">
+                <!-- Dynamically populated -->
+            </div>
+        </section>
+
+        <!-- Contact Admin Page -->
+        <section id="contactAdmin" class="page">
+            <div class="page-header">
+                <h2>Contact Admin</h2>
+                <button class="btn btn-back" onclick="goBack()">
+                    <i class="fas fa-arrow-left"></i> Back
+                </button>
+            </div>
+            
+            <div class="form-container">
+                <form id="messageForm">
+                    <div class="form-group">
+                        <label for="messageContent">Your Message</label>
+                        <textarea id="messageContent" rows="6" 
+                                  placeholder="Type your message to admin here..." required></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Send Message</button>
+                </form>
+                
+                <div class="previous-messages">
+                    <h3>Your Previous Messages</h3>
+                    <div id="userMessages">
+                        <!-- Dynamically populated -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- View Messages (Admin) -->
+        <section id="viewMessages" class="page">
+            <div class="page-header">
+                <h2>Messages from Users</h2>
+                <button class="btn btn-back" onclick="showPage('adminDashboard')">
+                    <i class="fas fa-arrow-left"></i> Back to Dashboard
+                </button>
+            </div>
+            
+            <div id="adminMessages" class="messages-container">
+                <!-- Dynamically populated -->
+            </div>
+        </section>
+    </div>
+
+    <!-- Add Leader Modal (Admin) -->
+    <div id="addLeaderModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeModal()">&times;</span>
+            <h2>Add New Leader</h2>
+            <form id="addLeaderForm">
+                <div class="form-group">
+                    <label for="leaderName">Leader Name</label>
+                    <input type="text" id="leaderName" required>
+                </div>
+                <div class="form-group">
+                    <label for="leaderRole">Role</label>
+                    <input type="text" id="leaderRole" required>
+                </div>
+                <div class="form-group">
+                    <label for="leaderDesc">Description</label>
+                    <textarea id="leaderDesc" rows="4" required></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Add Leader</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Leader Modal (Admin) -->
+    <div id="editLeaderModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeModal()">&times;</span>
+            <h2>Edit Leader</h2>
+            <form id="editLeaderForm">
+                <input type="hidden" id="editLeaderId">
+                <div class="form-group">
+                    <label for="editLeaderName">Leader Name</label>
+                    <input type="text" id="editLeaderName" required>
+                </div>
+                <div class="form-group">
+                    <label for="editLeaderRole">Role</label>
+                    <input type="text" id="editLeaderRole" required>
+                </div>
+                <div class="form-group">
+                    <label for="editLeaderDesc">Description</label>
+                    <textarea id="editLeaderDesc" rows="4" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="editLeaderStatus">Status</label>
+                    <select id="editLeaderStatus" required>
+                        <option value="Active">Active</option>
+                        <option value="Inactive">Inactive</option>
+                    </select>
+                </div>
+                <div class="modal-buttons">
+                    <button type="submit" class="btn btn-primary">Update</button>
+                    <button type="button" class="btn btn-danger" onclick="deleteLeader()">Delete</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
