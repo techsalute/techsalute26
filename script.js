@@ -1,6 +1,6 @@
 // Configuration
 const CONFIG = {
-    API_URL: 'https://script.google.com/macros/s/AKfycbzJAOZo9UBDb8YcTIwv5EG0w7GsPKbwkO2IY4RCTh3VnYLmtd5ApiY6uj52FwulD8q1/exec', // Replace with your deployed URL
+    API_URL: 'https://script.google.com/macros/s/AKfycbzs18_R5dO52dTwDtot2TJ19KBaHIYSWETq72Ri1sCeXEcr3udKAdULX5dF6wZ_KDst/exec', // Replace with your deployed URL
     USER_KEY: 'community_user',
     ADMIN_KEY: 'community_admin',
     MONTHS: ['January', 'February', 'March', 'April', 'May', 'June', 
@@ -676,4 +676,5 @@ document.addEventListener('DOMContentLoaded', () => {
         dateField.min = '2020-01-01';
         dateField.max = today;
     }
+
 });
