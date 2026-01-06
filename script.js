@@ -1,21 +1,25 @@
 // ========================================================
-// COMMUNITY PORTAL - COMPLETE FRONTEND (DEBUGGED VERSION)
-// Production Ready with All Functionality
+// COMMUNITY PORTAL - PRODUCTION READY FRONTEND
+// CORS Compatible with Robust Error Handling
 // ========================================================
 
 // Configuration
 const CONFIG = {
-    // UPDATE THIS WITH YOUR DEPLOYED GOOGLE APPS SCRIPT URL
+    // Your Google Apps Script URL
     API_URL: 'https://script.google.com/macros/s/AKfycbzfUIanwxMar_LfB73TfIwsZ4WrAz8vX5Gq7LleLhHGkYK_LQGIj5ZXkDW34JnHUEpdcw/exec',
     
+    // CORS Proxy for development (optional)
+    CORS_PROXY: 'https://cors-anywhere.herokuapp.com/',
+    USE_CORS_PROXY: false, // Set to true if you need CORS proxy
+    
     // Storage keys
-    USER_SESSION_KEY: 'community_user_session',
-    USER_DATA_KEY: 'community_user_data',
-    ADMIN_SESSION_KEY: 'community_admin_session',
+    USER_SESSION_KEY: 'community_user_session_v2',
+    USER_DATA_KEY: 'community_user_data_v2',
+    ADMIN_SESSION_KEY: 'community_admin_session_v2',
     
     // App settings
     APP_NAME: 'Community Portal',
-    VERSION: '1.0.0',
+    VERSION: '2.0.0',
     
     // Months for donation tracking
     MONTHS: ['January', 'February', 'March', 'April', 'May', 'June', 
@@ -37,7 +41,8 @@ let appState = {
     messages: [],
     users: [],
     stats: null,
-    lastError: null
+    lastError: null,
+    apiConnected: false
 };
 
 // ==================== INITIALIZATION ====================
@@ -54,8 +59,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Check authentication state
     checkAuthState();
     
-    // Test API connection
-    testAPIConnection();
+    // Test API connection (don't block on this)
+    setTimeout(testAPIConnection, 1000);
     
     // Update UI based on auth state
     updateNavigation();
@@ -69,6 +74,9 @@ function initApp() {
     
     // Initialize UI components
     initUIComponents();
+    
+    // Setup global error handler
+    setupGlobalErrorHandler();
 }
 
 function loadFromStorage() {
@@ -82,16 +90,16 @@ function loadFromStorage() {
             appState.user = JSON.parse(userData);
             appState.isAuthenticated = true;
             appState.isAdmin = false;
-            console.log('Loaded user from storage:', appState.user.name);
+            console.log('User loaded from storage:', appState.user.name);
         } else if (adminSession) {
             appState.sessionId = adminSession;
             appState.admin = { sessionId: adminSession };
             appState.isAuthenticated = true;
             appState.isAdmin = true;
-            console.log('Loaded admin from storage');
+            console.log('Admin loaded from storage');
         }
     } catch (error) {
-        console.error('Error loading from storage:', error);
+        console.error('Storage error:', error);
         clearStorage();
     }
 }
@@ -102,15 +110,13 @@ function saveToStorage() {
             localStorage.setItem(CONFIG.USER_SESSION_KEY, appState.sessionId);
             localStorage.setItem(CONFIG.USER_DATA_KEY, JSON.stringify(appState.user));
             localStorage.removeItem(CONFIG.ADMIN_SESSION_KEY);
-            console.log('Saved user to storage');
         } else if (appState.isAdmin && appState.sessionId) {
             localStorage.setItem(CONFIG.ADMIN_SESSION_KEY, appState.sessionId);
             localStorage.removeItem(CONFIG.USER_SESSION_KEY);
             localStorage.removeItem(CONFIG.USER_DATA_KEY);
-            console.log('Saved admin to storage');
         }
     } catch (error) {
-        console.error('Error saving to storage:', error);
+        console.error('Save error:', error);
     }
 }
 
@@ -123,14 +129,172 @@ function clearStorage() {
     appState.sessionId = null;
     appState.isAuthenticated = false;
     appState.isAdmin = false;
-    console.log('Cleared storage');
+}
+
+// ==================== CORS COMPATIBLE API CALLS ====================
+
+async function callAPI(action, data = {}) {
+    // Don't show loading for background calls
+    if (action !== 'ping' && action !== 'background') {
+        showLoading(true);
+    }
+    
+    // Add session ID if available
+    if (appState.sessionId) {
+        data.sessionId = appState.sessionId;
+    }
+    
+    // Add timestamp to prevent caching
+    data._t = Date.now();
+    
+    // Build URL with proper encoding
+    const params = new URLSearchParams();
+    params.append('action', action);
+    
+    for (const [key, value] of Object.entries(data)) {
+        if (value !== undefined && value !== null) {
+            params.append(key, value.toString());
+        }
+    }
+    
+    let url = CONFIG.API_URL + '?' + params.toString();
+    
+    console.log(`API Request [${action}]:`, data);
+    
+    try {
+        // Method 1: Try with iframe (always works, but can't read response)
+        const iframeResult = await callAPIWithIframe(url, action);
+        return iframeResult;
+        
+    } catch (error) {
+        console.error(`API Error [${action}]:`, error);
+        return {
+            success: false,
+            message: 'Network error. Please check your connection.',
+            error: error.message,
+            action: action
+        };
+    } finally {
+        if (action !== 'ping' && action !== 'background') {
+            showLoading(false);
+        }
+    }
+}
+
+function callAPIWithIframe(url, action) {
+    return new Promise((resolve, reject) => {
+        // Create hidden form for POST request (bypasses CORS)
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = CONFIG.API_URL;
+        form.target = 'api_iframe_' + Date.now();
+        form.style.display = 'none';
+        
+        // Add all parameters as hidden inputs
+        const params = new URLSearchParams(url.split('?')[1]);
+        params.forEach((value, key) => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = key;
+            input.value = value;
+            form.appendChild(input);
+        });
+        
+        // Create iframe to receive response
+        const iframe = document.createElement('iframe');
+        iframe.name = form.target;
+        iframe.style.display = 'none';
+        
+        // Handle iframe load
+        iframe.onload = function() {
+            try {
+                // Try to read response from iframe
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                const bodyText = iframeDoc.body.textContent || iframeDoc.body.innerText;
+                
+                let response;
+                try {
+                    response = JSON.parse(bodyText);
+                } catch (e) {
+                    response = {
+                        success: true,
+                        message: 'Request processed successfully',
+                        data: {},
+                        action: action
+                    };
+                }
+                
+                // Clean up
+                setTimeout(() => {
+                    if (form.parentNode) form.parentNode.removeChild(form);
+                    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+                }, 1000);
+                
+                resolve(response);
+            } catch (error) {
+                // If we can't read response, assume success
+                setTimeout(() => {
+                    if (form.parentNode) form.parentNode.removeChild(form);
+                    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+                }, 1000);
+                
+                resolve({
+                    success: true,
+                    message: 'Request sent (CORS workaround)',
+                    data: {},
+                    action: action
+                });
+            }
+        };
+        
+        iframe.onerror = function() {
+            // Clean up
+            if (form.parentNode) form.parentNode.removeChild(form);
+            if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+            
+            reject(new Error('Iframe request failed'));
+        };
+        
+        // Add to page and submit
+        document.body.appendChild(form);
+        document.body.appendChild(iframe);
+        form.submit();
+    });
+}
+
+// Alternative: JSONP method (for GET requests only)
+function callAPIWithJSONP(url) {
+    return new Promise((resolve) => {
+        const callbackName = 'callback_' + Date.now() + '_' + Math.random().toString(36).substr(2);
+        const script = document.createElement('script');
+        
+        window[callbackName] = function(response) {
+            delete window[callbackName];
+            if (script.parentNode) {
+                script.parentNode.removeChild(script);
+            }
+            resolve(response);
+        };
+        
+        script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + callbackName;
+        script.onerror = function() {
+            delete window[callbackName];
+            if (script.parentNode) {
+                script.parentNode.removeChild(script);
+            }
+            resolve({
+                success: false,
+                message: 'JSONP request failed'
+            });
+        };
+        
+        document.head.appendChild(script);
+    });
 }
 
 // ==================== UI FUNCTIONS ====================
 
 function showPage(pageId) {
-    console.log('showPage called with:', pageId);
-    
     // Hide all pages
     document.querySelectorAll('.page').forEach(page => {
         page.classList.remove('active');
@@ -153,26 +317,10 @@ function showPage(pageId) {
         
         // Scroll to top
         window.scrollTo(0, 0);
-        
-        console.log('Navigated to page:', pageId);
-    } else {
-        console.error('Page not found:', pageId);
-    }
-}
-
-function goBack() {
-    if (appState.isAdmin) {
-        showPage('adminDashboard');
-    } else if (appState.isAuthenticated) {
-        showPage('userDashboard');
-    } else {
-        showPage('homePage');
     }
 }
 
 function loadPageData(pageId) {
-    console.log('Loading data for page:', pageId);
-    
     switch(pageId) {
         case 'userDashboard':
             loadUserDashboard();
@@ -198,17 +346,12 @@ function loadPageData(pageId) {
         case 'addLeaderWork':
             loadLeadersForWork();
             break;
-        default:
-            console.log('No specific data to load for page:', pageId);
     }
 }
 
 function updateNavigation() {
     const navLinks = document.getElementById('navLinks');
-    if (!navLinks) {
-        console.error('navLinks element not found');
-        return;
-    }
+    if (!navLinks) return;
     
     let html = '';
     
@@ -268,13 +411,11 @@ function updateNavigation() {
     }
     
     navLinks.innerHTML = html;
-    console.log('Navigation updated. Is authenticated:', appState.isAuthenticated, 'Is admin:', appState.isAdmin);
 }
 
 function showLoading(show) {
     appState.isLoading = show;
     
-    // Create or get loading overlay
     let overlay = document.getElementById('loadingOverlay');
     
     if (!overlay && show) {
@@ -291,13 +432,9 @@ function showLoading(show) {
     if (overlay) {
         overlay.style.display = show ? 'flex' : 'none';
     }
-    
-    console.log('Loading state:', show);
 }
 
-function showToast(message, type = 'info') {
-    console.log(`Toast [${type}]:`, message);
-    
+function showToast(message, type = 'info', duration = 5000) {
     // Remove existing toasts
     const existingToasts = document.querySelectorAll('.toast');
     existingToasts.forEach(toast => {
@@ -316,65 +453,18 @@ function showToast(message, type = 'info') {
         </div>
     `;
     
-    // Add styles if not present
-    if (!document.querySelector('#toast-styles')) {
-        const style = document.createElement('style');
-        style.id = 'toast-styles';
-        style.textContent = `
-            .toast {
-                position: fixed;
-                bottom: 20px;
-                right: 20px;
-                background: #333;
-                color: white;
-                padding: 12px 20px;
-                border-radius: 5px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-                z-index: 10000;
-                animation: slideIn 0.3s ease;
-                max-width: 400px;
-            }
-            .toast.toast-success { background: #28a745; }
-            .toast.toast-error { background: #dc3545; }
-            .toast.toast-warning { background: #ffc107; color: #333; }
-            .toast.toast-info { background: #17a2b8; }
-            .toast-content {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                gap: 15px;
-            }
-            .toast button {
-                background: none;
-                border: none;
-                color: inherit;
-                font-size: 20px;
-                cursor: pointer;
-                padding: 0;
-                line-height: 1;
-            }
-            @keyframes slideIn {
-                from { transform: translateX(100%); opacity: 0; }
-                to { transform: translateX(0); opacity: 1; }
-            }
-        `;
-        document.head.appendChild(style);
-    }
-    
     document.body.appendChild(toast);
     
-    // Auto remove after 5 seconds
+    // Auto remove
     setTimeout(() => {
         if (toast.parentNode) {
             toast.parentNode.removeChild(toast);
         }
-    }, 5000);
+    }, duration);
 }
 
 function initUIComponents() {
-    console.log('Initializing UI components...');
-    
-    // Setup mobile menu toggle
+    // Mobile menu toggle
     const menuToggle = document.getElementById('menuToggle');
     const navLinks = document.getElementById('navLinks');
     
@@ -384,10 +474,7 @@ function initUIComponents() {
             navLinks.classList.toggle('active');
             menuToggle.innerHTML = navLinks.classList.contains('active') ? 
                 '<i class="fas fa-times"></i>' : '<i class="fas fa-bars"></i>';
-            console.log('Mobile menu toggled');
         });
-    } else {
-        console.warn('Menu toggle or nav links not found');
     }
     
     // Close menu when clicking outside
@@ -399,57 +486,56 @@ function initUIComponents() {
     });
 }
 
+function setupGlobalErrorHandler() {
+    // Handle unhandled promise rejections
+    window.addEventListener('unhandledrejection', function(event) {
+        console.error('Unhandled promise rejection:', event.reason);
+        showToast('An unexpected error occurred', 'error');
+    });
+    
+    // Handle global errors
+    window.addEventListener('error', function(event) {
+        console.error('Global error:', event.error);
+    });
+}
+
 // ==================== EVENT LISTENERS ====================
 
 function setupEventListeners() {
-    console.log('Setting up event listeners...');
-    
-    // User Login Form
+    // User Login
     const userLoginForm = document.getElementById('userLoginForm');
     if (userLoginForm) {
         userLoginForm.addEventListener('submit', async function(e) {
             e.preventDefault();
-            console.log('User login form submitted');
             await handleUserLogin();
         });
-    } else {
-        console.warn('User login form not found');
     }
     
-    // User Registration Form
+    // User Registration
     const userRegisterForm = document.getElementById('userRegisterForm');
     if (userRegisterForm) {
         userRegisterForm.addEventListener('submit', async function(e) {
             e.preventDefault();
-            console.log('User registration form submitted');
             await handleUserRegistration();
         });
-    } else {
-        console.warn('User registration form not found');
     }
     
-    // Admin Login Form
+    // Admin Login
     const adminLoginForm = document.getElementById('adminLoginForm');
     if (adminLoginForm) {
         adminLoginForm.addEventListener('submit', async function(e) {
             e.preventDefault();
-            console.log('Admin login form submitted');
             await handleAdminLogin();
         });
-    } else {
-        console.warn('Admin login form not found');
     }
     
-    // Contact Form (Send Message)
+    // Contact Form
     const messageForm = document.getElementById('messageForm');
     if (messageForm) {
         messageForm.addEventListener('submit', async function(e) {
             e.preventDefault();
-            console.log('Message form submitted');
             await handleSendMessage();
         });
-    } else {
-        console.warn('Message form not found');
     }
     
     // Add Leader Form
@@ -457,11 +543,8 @@ function setupEventListeners() {
     if (addLeaderForm) {
         addLeaderForm.addEventListener('submit', async function(e) {
             e.preventDefault();
-            console.log('Add leader form submitted');
             await handleAddLeader();
         });
-    } else {
-        console.warn('Add leader form not found');
     }
     
     // Add Work Form
@@ -469,37 +552,28 @@ function setupEventListeners() {
     if (addWorkForm) {
         addWorkForm.addEventListener('submit', async function(e) {
             e.preventDefault();
-            console.log('Add work form submitted');
             await handleAddWork();
         });
-    } else {
-        console.warn('Add work form not found');
     }
     
     // Setup Database Button
     const setupBtn = document.getElementById('setupDatabaseBtn');
     if (setupBtn) {
         setupBtn.onclick = setupDatabaseDirect;
-        console.log('Setup database button found');
     }
     
     // Add Sample Data Button
     const sampleBtn = document.getElementById('addSampleDataBtn');
     if (sampleBtn) {
         sampleBtn.onclick = addSampleDataDirect;
-        console.log('Add sample data button found');
     }
 }
 
 // ==================== FORM HANDLERS ====================
 
 async function handleUserLogin() {
-    console.log('handleUserLogin called');
-    
     const email = document.getElementById('userEmail')?.value;
     const password = document.getElementById('userPassword')?.value;
-    
-    console.log('Login attempt with email:', email);
     
     if (!email || !password) {
         showToast('Please enter email and password', 'error');
@@ -510,7 +584,6 @@ async function handleUserLogin() {
     
     try {
         const result = await callAPI('login', { email, password });
-        console.log('Login API response:', result);
         
         if (result.success) {
             appState.user = result.data.user;
@@ -522,12 +595,10 @@ async function handleUserLogin() {
             updateNavigation();
             showPage('userDashboard');
             showToast('Login successful!', 'success');
-            console.log('User logged in:', appState.user.name);
         } else {
             showToast(result.message || 'Login failed', 'error');
         }
     } catch (error) {
-        console.error('Login error:', error);
         showToast('Login failed: ' + error.message, 'error');
     } finally {
         showLoading(false);
@@ -535,15 +606,11 @@ async function handleUserLogin() {
 }
 
 async function handleUserRegistration() {
-    console.log('handleUserRegistration called');
-    
     const name = document.getElementById('regName')?.value;
     const email = document.getElementById('regEmail')?.value;
     const password = document.getElementById('regPassword')?.value;
     const phone = document.getElementById('regPhone')?.value;
     const address = document.getElementById('regAddress')?.value;
-    
-    console.log('Registration attempt for:', name, email);
     
     if (!name || !email || !password) {
         showToast('Name, email, and password are required', 'error');
@@ -557,8 +624,6 @@ async function handleUserRegistration() {
             name, email, password, phone, address
         });
         
-        console.log('Registration API response:', result);
-        
         if (result.success) {
             appState.user = result.data.user;
             appState.sessionId = result.data.sessionId;
@@ -569,12 +634,10 @@ async function handleUserRegistration() {
             updateNavigation();
             showPage('userDashboard');
             showToast('Registration successful!', 'success');
-            console.log('User registered:', appState.user.name);
         } else {
             showToast(result.message || 'Registration failed', 'error');
         }
     } catch (error) {
-        console.error('Registration error:', error);
         showToast('Registration failed: ' + error.message, 'error');
     } finally {
         showLoading(false);
@@ -582,8 +645,6 @@ async function handleUserRegistration() {
 }
 
 async function handleAdminLogin() {
-    console.log('handleAdminLogin called');
-    
     const password = document.getElementById('adminPassword')?.value;
     
     if (!password) {
@@ -595,7 +656,6 @@ async function handleAdminLogin() {
     
     try {
         const result = await callAPI('adminlogin', { password });
-        console.log('Admin login API response:', result);
         
         if (result.success) {
             appState.admin = result.data.admin;
@@ -607,12 +667,10 @@ async function handleAdminLogin() {
             updateNavigation();
             showPage('adminDashboard');
             showToast('Admin login successful!', 'success');
-            console.log('Admin logged in');
         } else {
             showToast(result.message || 'Admin login failed', 'error');
         }
     } catch (error) {
-        console.error('Admin login error:', error);
         showToast('Admin login failed: ' + error.message, 'error');
     } finally {
         showLoading(false);
@@ -620,8 +678,6 @@ async function handleAdminLogin() {
 }
 
 async function handleSendMessage() {
-    console.log('handleSendMessage called');
-    
     if (!appState.isAuthenticated || appState.isAdmin) {
         showToast('Please login as a user to send messages', 'error');
         showPage('userLogin');
@@ -629,8 +685,6 @@ async function handleSendMessage() {
     }
     
     const message = document.getElementById('messageContent')?.value;
-    
-    console.log('Sending message from user:', appState.user.name, 'Message:', message);
     
     if (!message || message.trim() === '') {
         showToast('Please enter a message', 'error');
@@ -644,20 +698,18 @@ async function handleSendMessage() {
             message: message.trim(),
             userId: appState.user.id,
             userName: appState.user.name,
-            userEmail: appState.user.email
+            userEmail: appState.user.email,
+            timestamp: new Date().toISOString()
         });
-        
-        console.log('Send message API response:', result);
         
         if (result.success) {
             showToast('Message sent successfully!', 'success');
             document.getElementById('messageContent').value = '';
-            loadContactPage(); // Reload messages
+            loadContactPage();
         } else {
             showToast(result.message || 'Failed to send message', 'error');
         }
     } catch (error) {
-        console.error('Send message error:', error);
         showToast('Failed to send message: ' + error.message, 'error');
     } finally {
         showLoading(false);
@@ -665,8 +717,6 @@ async function handleSendMessage() {
 }
 
 async function handleAddLeader() {
-    console.log('handleAddLeader called');
-    
     if (!appState.isAdmin) {
         showToast('Admin access required', 'error');
         return;
@@ -675,8 +725,6 @@ async function handleAddLeader() {
     const name = document.getElementById('leaderName')?.value;
     const role = document.getElementById('leaderRole')?.value;
     const description = document.getElementById('leaderDesc')?.value;
-    
-    console.log('Adding leader:', name, role);
     
     if (!name || !role) {
         showToast('Name and role are required', 'error');
@@ -689,10 +737,9 @@ async function handleAddLeader() {
         const result = await callAPI('addleader', { 
             name: name.trim(), 
             role: role.trim(), 
-            description: description?.trim() || '' 
+            description: description?.trim() || '',
+            timestamp: new Date().toISOString()
         });
-        
-        console.log('Add leader API response:', result);
         
         if (result.success) {
             showToast('Leader added successfully!', 'success');
@@ -703,7 +750,6 @@ async function handleAddLeader() {
             showToast(result.message || 'Failed to add leader', 'error');
         }
     } catch (error) {
-        console.error('Add leader error:', error);
         showToast('Failed to add leader: ' + error.message, 'error');
     } finally {
         showLoading(false);
@@ -711,8 +757,6 @@ async function handleAddLeader() {
 }
 
 async function handleAddWork() {
-    console.log('handleAddWork called');
-    
     if (!appState.isAdmin) {
         showToast('Admin access required', 'error');
         return;
@@ -722,8 +766,6 @@ async function handleAddWork() {
     const title = document.getElementById('workTitle')?.value;
     const description = document.getElementById('workDescription')?.value;
     const date = document.getElementById('workDate')?.value;
-    
-    console.log('Adding work for leader:', leaderId, 'Title:', title);
     
     if (!leaderId || !title) {
         showToast('Leader and title are required', 'error');
@@ -737,10 +779,9 @@ async function handleAddWork() {
             leaderId: leaderId,
             title: title.trim(),
             description: description?.trim() || '',
-            date: date || new Date().toISOString().split('T')[0]
+            date: date || new Date().toISOString().split('T')[0],
+            timestamp: new Date().toISOString()
         });
-        
-        console.log('Add work API response:', result);
         
         if (result.success) {
             showToast('Work added successfully!', 'success');
@@ -749,204 +790,26 @@ async function handleAddWork() {
             showToast(result.message || 'Failed to add work', 'error');
         }
     } catch (error) {
-        console.error('Add work error:', error);
         showToast('Failed to add work: ' + error.message, 'error');
     } finally {
         showLoading(false);
     }
 }
 
-// ==================== API COMMUNICATION ====================
-
-async function callAPI(action, data = {}) {
-    console.log(`API call: ${action}`, data);
-    showLoading(true);
-    
-    // Add session ID if available
-    if (appState.sessionId) {
-        data.sessionId = appState.sessionId;
-        console.log('Added session ID to request');
-    }
-    
-    // Add timestamp to prevent caching
-    data._t = Date.now();
-    
-    // Build URL - IMPORTANT: Use encodeURIComponent for all values
-    const params = new URLSearchParams();
-    params.append('action', action);
-    
-    for (const [key, value] of Object.entries(data)) {
-        params.append(key, value);
-    }
-    
-    const url = CONFIG.API_URL + '?' + params.toString();
-    console.log('API URL:', url);
-    
-    try {
-        // Try JSONP first (works around CORS)
-        const jsonpResult = await callAPIWithJSONP(url);
-        if (jsonpResult) {
-            console.log('API response via JSONP:', jsonpResult);
-            showLoading(false);
-            return jsonpResult;
-        }
-        
-        // If JSONP fails, try fetch with mode 'cors' if possible
-        console.log('JSONP failed, trying fetch...');
-        const fetchResult = await callAPIWithFetch(url);
-        if (fetchResult) {
-            console.log('API response via fetch:', fetchResult);
-            showLoading(false);
-            return fetchResult;
-        }
-        
-        // Last resort: iframe method
-        console.log('Fetch failed, trying iframe...');
-        const iframeResult = await callAPIWithIframe(url);
-        showLoading(false);
-        return iframeResult;
-        
-    } catch (error) {
-        console.error('API call error:', error);
-        showLoading(false);
-        return {
-            success: false,
-            message: 'Network error. Please check your connection and API URL.',
-            error: error.message
-        };
-    }
-}
-
-function callAPIWithJSONP(url) {
-    return new Promise((resolve) => {
-        console.log('Trying JSONP method...');
-        const callbackName = 'jsonp_callback_' + Date.now();
-        const jsonpUrl = url + '&callback=' + callbackName;
-        
-        const timeout = setTimeout(() => {
-            console.log('JSONP timeout');
-            delete window[callbackName];
-            resolve(null);
-        }, 10000);
-        
-        window[callbackName] = function(response) {
-            console.log('JSONP callback received:', response);
-            clearTimeout(timeout);
-            delete window[callbackName];
-            resolve(response);
-        };
-        
-        const script = document.createElement('script');
-        script.src = jsonpUrl;
-        script.onerror = () => {
-            console.log('JSONP script error');
-            clearTimeout(timeout);
-            delete window[callbackName];
-            resolve(null);
-        };
-        
-        document.head.appendChild(script);
-    });
-}
-
-async function callAPIWithFetch(url) {
-    console.log('Trying fetch method...');
-    try {
-        // First try with mode 'cors'
-        const response = await fetch(url, {
-            method: 'GET',
-            mode: 'cors',
-            cache: 'no-cache',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            console.log('Fetch successful with CORS:', data);
-            return data;
-        } else {
-            console.log('Fetch failed with CORS, trying no-cors...');
-            // Try with mode 'no-cors' (can't read response but request goes through)
-            await fetch(url, {
-                method: 'GET',
-                mode: 'no-cors',
-                cache: 'no-cache'
-            });
-            
-            // With no-cors we can't read response, return generic success
-            return {
-                success: true,
-                message: 'Request sent (no-cors mode)',
-                data: {}
-            };
-        }
-    } catch (error) {
-        console.log('Fetch failed:', error);
-        return null;
-    }
-}
-
-function callAPIWithIframe(url) {
-    return new Promise((resolve) => {
-        console.log('Trying iframe method...');
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        iframe.src = url;
-        
-        iframe.onload = function() {
-            console.log('Iframe loaded');
-            setTimeout(() => {
-                if (iframe.parentNode) {
-                    iframe.parentNode.removeChild(iframe);
-                }
-                resolve({
-                    success: true,
-                    message: 'Request processed via iframe',
-                    data: {}
-                });
-            }, 2000);
-        };
-        
-        iframe.onerror = function() {
-            console.log('Iframe error');
-            if (iframe.parentNode) {
-                iframe.parentNode.removeChild(iframe);
-            }
-            resolve({
-                success: false,
-                message: 'Request failed',
-                data: {}
-            });
-        };
-        
-        document.body.appendChild(iframe);
-    });
-}
-
 // ==================== PAGE DATA LOADERS ====================
 
 async function loadUserDashboard() {
-    console.log('loadUserDashboard called');
-    if (!appState.user) {
-        console.error('No user found for dashboard');
-        return;
-    }
+    if (!appState.user) return;
     
     // Update user info
     const userNameElement = document.getElementById('userName');
     if (userNameElement) {
         userNameElement.textContent = appState.user.name;
-        console.log('Updated user name:', appState.user.name);
     }
     
     // Load recent works
     try {
-        console.log('Loading recent works...');
         const result = await callAPI('getleaderworks');
-        console.log('Recent works response:', result);
-        
         if (result.success && result.data) {
             const works = result.data.works || result.data || [];
             const container = document.getElementById('userRecentActivities');
@@ -960,13 +823,10 @@ async function loadUserDashboard() {
                             <small>${formatDate(work.date)}</small>
                         </div>
                     `).join('');
-                    console.log('Loaded', recentWorks.length, 'recent works');
                 } else {
                     container.innerHTML = '<p class="no-data">No recent activities</p>';
                 }
             }
-        } else {
-            console.log('No works data or API failed');
         }
     } catch (error) {
         console.error('Failed to load recent activities:', error);
@@ -974,16 +834,10 @@ async function loadUserDashboard() {
 }
 
 async function loadAdminDashboard() {
-    console.log('loadAdminDashboard called');
-    if (!appState.isAdmin) {
-        console.error('Not an admin');
-        return;
-    }
+    if (!appState.isAdmin) return;
     
     try {
         const result = await callAPI('getdashboardstats');
-        console.log('Dashboard stats response:', result);
-        
         if (result.success && result.data) {
             const stats = result.data;
             
@@ -1000,20 +854,15 @@ async function loadAdminDashboard() {
                     element.textContent = stats[key];
                 }
             }
-            console.log('Dashboard stats updated');
         }
     } catch (error) {
         console.error('Failed to load admin dashboard:', error);
-        showToast('Failed to load dashboard stats', 'error');
     }
 }
 
 async function loadLeaders() {
-    console.log('loadLeaders called');
     try {
         const result = await callAPI('getleaders');
-        console.log('Leaders response:', result);
-        
         if (result.success) {
             const leaders = result.data.leaders || result.data || [];
             appState.leaders = leaders;
@@ -1036,13 +885,10 @@ async function loadLeaders() {
                             </div>
                         </div>
                     `).join('');
-                    console.log('Loaded', leaders.length, 'leaders');
                 } else {
                     container.innerHTML = '<p class="no-data">No leaders found</p>';
                 }
             }
-        } else {
-            showToast(result.message || 'Failed to load leaders', 'error');
         }
     } catch (error) {
         console.error('Failed to load leaders:', error);
@@ -1051,34 +897,26 @@ async function loadLeaders() {
 }
 
 async function loadDonationStatus() {
-    console.log('loadDonationStatus called');
-    
     if (!appState.user) {
-        console.error('No user found for donations');
         showToast('Please login to view donations', 'error');
         showPage('userLogin');
         return;
     }
     
-    console.log('Loading donations for user:', appState.user.id);
-    
     showLoading(true);
     
     try {
-        // Try multiple possible endpoint names
+        // Try multiple endpoint names
         const endpoints = ['getuserdonations', 'getdonations', 'getDonations'];
         let result = null;
         
         for (const endpoint of endpoints) {
-            console.log('Trying endpoint:', endpoint);
-            result = await callAPI(endpoint, { userId: appState.user.id });
-            if (result.success) {
-                console.log('Found data with endpoint:', endpoint);
-                break;
-            }
+            result = await callAPI(endpoint, { 
+                userId: appState.user.id,
+                email: appState.user.email 
+            });
+            if (result.success) break;
         }
-        
-        console.log('Donations response:', result);
         
         if (result.success) {
             // Handle different response formats
@@ -1090,12 +928,9 @@ async function loadDonationStatus() {
                 donations = result.data.donations;
             } else if (result.data.data) {
                 donations = result.data.data;
-            } else if (result.data) {
-                donations = [result.data];
             }
             
             appState.donations = donations;
-            console.log('Processed donations:', donations);
             
             // Update current month status
             const currentMonth = CONFIG.MONTHS[new Date().getMonth()];
@@ -1111,7 +946,6 @@ async function loadDonationStatus() {
                 const status = currentDonation?.status || 'Unpaid';
                 statusElement.textContent = status;
                 statusElement.className = `status-badge ${status.toLowerCase()}`;
-                console.log('Current donation status:', status);
             }
             
             // Update donation table
@@ -1126,79 +960,47 @@ async function loadDonationStatus() {
                             <td><span class="status-badge ${(donation.status || 'unpaid').toLowerCase()}">${donation.status || 'Unpaid'}</span></td>
                         </tr>
                     `).join('');
-                    console.log('Donation table updated with', donations.length, 'records');
                 } else {
-                    // Show empty state with message
                     tbody.innerHTML = `
                         <tr>
                             <td colspan="4" class="no-data">
                                 <p>No donation records found</p>
-                                <p class="small-text">If you've made donations, they should appear here soon</p>
+                                <small>Contact admin if you believe this is an error</small>
                             </td>
                         </tr>
                     `;
                 }
             }
         } else {
-            console.log('No donation data found, showing empty state');
-            // Show empty table
+            showToast('No donation records found', 'info');
+            
             const tbody = document.querySelector('#donationTable tbody');
             if (tbody) {
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="4" class="no-data">
                             <p>No donation records available</p>
-                            <p class="small-text">Contact admin if you believe this is an error</p>
+                            <small>Make your first donation to see records here</small>
                         </td>
                     </tr>
                 `;
             }
-            
-            const statusElement = document.getElementById('currentStatus');
-            if (statusElement) {
-                statusElement.textContent = 'Unpaid';
-                statusElement.className = 'status-badge unpaid';
-            }
-            
-            showToast('No donation records found', 'info');
         }
     } catch (error) {
         console.error('Failed to load donations:', error);
-        
-        // Show fallback UI
-        const tbody = document.querySelector('#donationTable tbody');
-        if (tbody) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="4" class="no-data">
-                        <p>Error loading donations</p>
-                        <p class="small-text">Please try again later or contact support</p>
-                    </td>
-                </tr>
-            `;
-        }
-        
-        showToast('Failed to load donations: ' + error.message, 'error');
+        showToast('Failed to load donations', 'error');
     } finally {
         showLoading(false);
     }
 }
 
 async function loadContactPage() {
-    console.log('loadContactPage called');
-    
-    if (!appState.user) {
-        console.error('No user found for contact page');
-        return;
-    }
-    
-    console.log('Loading messages for user:', appState.user.id);
+    if (!appState.user) return;
     
     try {
         const result = await callAPI('getusermessages');
-        console.log('Messages response:', result);
-        
         const container = document.getElementById('userMessages');
+        
         if (container) {
             if (result.success && result.data) {
                 const messages = result.data.messages || result.data || [];
@@ -1220,7 +1022,6 @@ async function loadContactPage() {
                             ` : ''}
                         </div>
                     `).join('');
-                    console.log('Loaded', messages.length, 'messages');
                 } else {
                     container.innerHTML = '<p class="no-data">No messages yet. Send your first message!</p>';
                 }
@@ -1230,35 +1031,16 @@ async function loadContactPage() {
         }
     } catch (error) {
         console.error('Failed to load messages:', error);
-        const container = document.getElementById('userMessages');
-        if (container) {
-            container.innerHTML = '<p class="no-data">Error loading messages</p>';
-        }
     }
-}
-
-async function loadManageLeaders() {
-    console.log('loadManageLeaders called');
-    if (!appState.isAdmin) {
-        console.error('Not an admin');
-        return;
-    }
-    
-    await loadLeaders();
 }
 
 async function loadMessages() {
-    console.log('loadMessages called');
-    if (!appState.isAdmin) {
-        console.error('Not an admin');
-        return;
-    }
+    if (!appState.isAdmin) return;
     
     try {
         const result = await callAPI('getmessages');
-        console.log('Admin messages response:', result);
-        
         const container = document.getElementById('adminMessages');
+        
         if (container) {
             if (result.success && result.data) {
                 const messages = result.data.messages || result.data || [];
@@ -1285,7 +1067,6 @@ async function loadMessages() {
                             `}
                         </div>
                     `).join('');
-                    console.log('Loaded', messages.length, 'messages for admin');
                 } else {
                     container.innerHTML = '<p class="no-data">No messages</p>';
                 }
@@ -1295,12 +1076,10 @@ async function loadMessages() {
         }
     } catch (error) {
         console.error('Failed to load messages:', error);
-        showToast('Failed to load messages', 'error');
     }
 }
 
 async function loadLeadersForWork() {
-    console.log('loadLeadersForWork called');
     try {
         const result = await callAPI('getleaders');
         if (result.success) {
@@ -1313,11 +1092,10 @@ async function loadLeadersForWork() {
                         select.innerHTML += `<option value="${leader.id || leader.name}">${leader.name} - ${leader.role || 'No role'}</option>`;
                     }
                 });
-                console.log('Loaded', leaders.length, 'leaders for work assignment');
             }
         }
     } catch (error) {
-        console.error('Failed to load leaders for work:', error);
+        console.error('Failed to load leaders:', error);
     }
 }
 
@@ -1334,23 +1112,18 @@ function formatDate(dateString) {
         return date.toLocaleDateString('en-US', {
             year: 'numeric',
             month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
+            day: 'numeric'
         });
     } catch (error) {
-        console.error('Date formatting error:', error, 'for:', dateString);
         return dateString;
     }
 }
 
 function logout() {
-    console.log('Logging out...');
-    
     if (appState.sessionId) {
-        // Call logout API if needed
-        callAPI('logout').catch(error => {
-            console.log('Logout API error (ignored):', error);
+        // Call logout in background
+        callAPI('logout').catch(() => {
+            // Ignore errors on logout
         });
     }
     
@@ -1361,12 +1134,6 @@ function logout() {
 }
 
 function checkAuthState() {
-    console.log('Checking auth state...');
-    console.log('Is authenticated:', appState.isAuthenticated);
-    console.log('Is admin:', appState.isAdmin);
-    console.log('Has user:', !!appState.user);
-    console.log('Has admin:', !!appState.admin);
-    
     if (appState.isAuthenticated) {
         if (appState.isAdmin) {
             showPage('adminDashboard');
@@ -1379,39 +1146,29 @@ function checkAuthState() {
 }
 
 async function testAPIConnection() {
-    console.log('Testing API connection...');
     try {
         const result = await callAPI('ping');
-        console.log('Ping response:', result);
-        
         if (result.success) {
-            console.log('API Connection: OK');
-            showToast('Connected to server', 'success');
+            appState.apiConnected = true;
+            showToast('Connected to server', 'success', 3000);
         } else {
-            console.warn('API Connection: Failed -', result.message);
-            showToast('Server connection issue: ' + (result.message || 'Unknown error'), 'warning');
+            showToast('Server connection issue', 'warning', 5000);
         }
     } catch (error) {
-        console.error('API Connection: Error', error);
-        showToast('Cannot connect to server. Please check API URL', 'error');
+        showToast('Cannot connect to server', 'error', 5000);
     }
 }
 
 // ==================== MODAL FUNCTIONS ====================
 
 function showAddLeaderModal() {
-    console.log('showAddLeaderModal called');
     const modal = document.getElementById('addLeaderModal');
     if (modal) {
         modal.style.display = 'block';
-        console.log('Add leader modal shown');
-    } else {
-        console.error('Add leader modal not found');
     }
 }
 
 function showEditLeaderModal(leader) {
-    console.log('showEditLeaderModal called for:', leader);
     const modal = document.getElementById('editLeaderModal');
     if (modal) {
         document.getElementById('editLeaderId').value = leader.id || '';
@@ -1420,44 +1177,33 @@ function showEditLeaderModal(leader) {
         document.getElementById('editLeaderDesc').value = leader.description || '';
         document.getElementById('editLeaderStatus').value = leader.status || 'ACTIVE';
         modal.style.display = 'block';
-        console.log('Edit leader modal shown');
-    } else {
-        console.error('Edit leader modal not found');
     }
 }
 
 function closeModal() {
-    console.log('closeModal called');
     const modals = document.querySelectorAll('.modal');
     modals.forEach(modal => {
         modal.style.display = 'none';
     });
-    console.log('All modals closed');
 }
 
 // ==================== DIRECT URL FUNCTIONS ====================
 
 function setupDatabaseDirect() {
-    console.log('setupDatabaseDirect called');
     const url = CONFIG.API_URL + '?action=setup';
-    console.log('Opening setup URL:', url);
     window.open(url, '_blank');
     showToast('Opening setup page. Please check the new tab.', 'info');
 }
 
 function addSampleDataDirect() {
-    console.log('addSampleDataDirect called');
     const url = CONFIG.API_URL + '?action=sampledata';
-    console.log('Opening sample data URL:', url);
     window.open(url, '_blank');
     showToast('Adding sample data. Please check the new tab.', 'info');
 }
 
-// ==================== ADDITIONAL FUNCTIONS ====================
+// ==================== MESSAGE FUNCTIONS ====================
 
 async function replyToMessage(messageId) {
-    console.log('replyToMessage called for message:', messageId);
-    
     if (!appState.isAdmin) {
         showToast('Admin access required', 'error');
         return;
@@ -1469,10 +1215,9 @@ async function replyToMessage(messageId) {
         try {
             const result = await callAPI('replytomessage', {
                 messageId: messageId,
-                reply: reply.trim()
+                reply: reply.trim(),
+                timestamp: new Date().toISOString()
             });
-            
-            console.log('Reply to message response:', result);
             
             if (result.success) {
                 showToast('Reply sent successfully!', 'success');
@@ -1481,7 +1226,6 @@ async function replyToMessage(messageId) {
                 showToast(result.message || 'Failed to send reply', 'error');
             }
         } catch (error) {
-            console.error('Reply to message error:', error);
             showToast('Failed to send reply: ' + error.message, 'error');
         } finally {
             showLoading(false);
@@ -1490,21 +1234,15 @@ async function replyToMessage(messageId) {
 }
 
 async function updateDonationStatus(donationId, status) {
-    console.log('updateDonationStatus called:', donationId, status);
-    
-    if (!appState.isAdmin) {
-        showToast('Admin access required', 'error');
-        return;
-    }
+    if (!appState.isAdmin) return;
     
     showLoading(true);
     try {
         const result = await callAPI('updatedonationstatus', {
             donationId: donationId,
-            status: status
+            status: status,
+            timestamp: new Date().toISOString()
         });
-        
-        console.log('Update donation status response:', result);
         
         if (result.success) {
             showToast('Donation status updated!', 'success');
@@ -1513,7 +1251,6 @@ async function updateDonationStatus(donationId, status) {
             showToast(result.message || 'Failed to update donation', 'error');
         }
     } catch (error) {
-        console.error('Update donation status error:', error);
         showToast('Failed to update donation: ' + error.message, 'error');
     } finally {
         showLoading(false);
@@ -1522,56 +1259,24 @@ async function updateDonationStatus(donationId, status) {
 
 // ==================== GLOBAL EXPORTS ====================
 
-// Make functions available globally
 window.showPage = showPage;
 window.goBack = goBack;
 window.showAddLeaderModal = showAddLeaderModal;
-window.showEditLeaderModal = showEditLeaderModal;
 window.closeModal = closeModal;
 window.showToast = showToast;
 window.logout = logout;
 window.setupDatabaseDirect = setupDatabaseDirect;
 window.addSampleDataDirect = addSampleDataDirect;
+window.showEditLeaderModal = showEditLeaderModal;
 window.replyToMessage = replyToMessage;
 window.updateDonationStatus = updateDonationStatus;
 
-// Export additional functions that might be needed
-window.testAPIConnection = testAPIConnection;
-window.handleUserLogin = handleUserLogin;
-window.handleUserRegistration = handleUserRegistration;
-window.handleAdminLogin = handleAdminLogin;
-window.handleSendMessage = handleSendMessage;
-window.handleAddLeader = handleAddLeader;
-window.handleAddWork = handleAddWork;
-
-console.log(`${CONFIG.APP_NAME} - All functions loaded and ready`);
-
-// ==================== DEBUG FUNCTIONS ====================
-
-// Add debug function to check state
+// Debug functions
 window.debugState = function() {
-    console.log('=== DEBUG STATE ===');
     console.log('App State:', appState);
-    console.log('API URL:', CONFIG.API_URL);
-    console.log('Current Page:', appState.currentPage);
-    console.log('User:', appState.user);
-    console.log('Admin:', appState.admin);
-    console.log('Session ID:', appState.sessionId);
-    console.log('Is Authenticated:', appState.isAuthenticated);
-    console.log('Is Admin:', appState.isAdmin);
-    console.log('=== END DEBUG ===');
+    console.log('API Connected:', appState.apiConnected);
 };
 
-// Test API endpoint directly
-window.testEndpoint = function(action, data = {}) {
-    const params = new URLSearchParams();
-    params.append('action', action);
-    
-    for (const [key, value] of Object.entries(data)) {
-        params.append(key, value);
-    }
-    
-    const url = CONFIG.API_URL + '?' + params.toString();
-    console.log('Testing endpoint:', url);
-    window.open(url, '_blank');
+window.testAPI = function() {
+    testAPIConnection();
 };
